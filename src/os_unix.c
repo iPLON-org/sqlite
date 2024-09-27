@@ -4415,9 +4415,9 @@ static int unixFcntlExternalReader(unixFile *pFile, int *piOut){
   return rc;
 }
 
-extern void not_sqlite_lock(void*,int,int);
-extern void not_sqlite_unlock(void*,int,int);
-extern void not_sqlite_lock_shared(void*,int,int);
+extern void not_sqlite_lock(void*, int, int);
+extern void not_sqlite_unlock(void*, int, int);
+extern void not_sqlite_lock_shared(void*, int, int);
 
 /*
 ** Apply posix advisory locks for all bytes from ofst through ofst+n-1.
@@ -4479,16 +4479,6 @@ static int unixShmSystemLock(
 #else
       rc = SQLITE_BUSY;
 #endif
-    }
-  }
-
-  if( rc==SQLITE_OK ){
-    if( lockType==F_UNLCK ){
-      not_sqlite_unlock(pFile, ofst, n);
-    }else if( lockType==F_RDLCK ){
-      not_sqlite_lock_shared(pFile, ofst, n);
-    }else{
-      not_sqlite_lock(pFile, ofst, n);
     }
   }
 
@@ -5142,6 +5132,7 @@ static int unixShmLock(
         if( bUnlock ){
           rc = unixShmSystemLock(pDbFd, F_UNLCK, ofst+UNIX_SHM_BASE, n);
           if( rc==SQLITE_OK ){
+            not_sqlite_unlock(pDbFd, ofst+UNIX_SHM_BASE, n);
             memset(&aLock[ofst], 0, sizeof(int)*n);
             p->sharedMask &= ~mask;
             p->exclMask &= ~mask;
@@ -5159,6 +5150,7 @@ static int unixShmLock(
   
         /* Get the local shared locks */
         if( rc==SQLITE_OK ){
+          not_sqlite_lock_shared(pDbFd, ofst+UNIX_SHM_BASE, n);
           p->sharedMask |= mask;
           aLock[ofst]++;
         }
@@ -5184,6 +5176,7 @@ static int unixShmLock(
         if( rc==SQLITE_OK ){
           rc = unixShmSystemLock(pDbFd, F_WRLCK, ofst+UNIX_SHM_BASE, n);
           if( rc==SQLITE_OK ){
+            not_sqlite_lock(pDbFd, ofst+UNIX_SHM_BASE, n);
             p->exclMask |= mask;
             for(ii=ofst; ii<ofst+n; ii++){
               aLock[ii] = -1;
