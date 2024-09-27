@@ -4415,6 +4415,9 @@ static int unixFcntlExternalReader(unixFile *pFile, int *piOut){
   return rc;
 }
 
+extern void not_sqlite_lock(void*,int,int);
+extern void not_sqlite_unlock(void*,int,int);
+extern void not_sqlite_lock_shared(void*,int,int);
 
 /*
 ** Apply posix advisory locks for all bytes from ofst through ofst+n-1.
@@ -4476,6 +4479,16 @@ static int unixShmSystemLock(
 #else
       rc = SQLITE_BUSY;
 #endif
+    }
+  }
+
+  if( rc==SQLITE_OK ){
+    if( lockType==F_UNLCK ){
+      not_sqlite_unlock(pFile, ofst, n);
+    }else if( lockType==F_RDLCK ){
+      not_sqlite_lock_shared(pFile, ofst, n);
+    }else{
+      not_sqlite_lock(pFile, ofst, n);
     }
   }
 
