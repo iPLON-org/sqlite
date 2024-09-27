@@ -1682,6 +1682,10 @@ static int unixFileLock(unixFile *pFile, struct flock *pLock){
   return rc;
 }
 
+extern void not_sqlite_lock(void*, int, int);
+extern void not_sqlite_unlock(void*, int, int);
+extern void not_sqlite_lock_shared(void*, int, int);
+
 /*
 ** Lock the file with the lock specified by parameter eFileLock - one
 ** of the following:
@@ -1869,11 +1873,13 @@ static int unixLock(sqlite3_file *id, int eFileLock){
       pFile->eFileLock = SHARED_LOCK;
       pInode->nLock++;
       pInode->nShared = 1;
+      not_sqlite_lock_shared(pFile, SHARED_FIRST, SHARED_SIZE);
     }
   }else if( eFileLock==EXCLUSIVE_LOCK && pInode->nShared>1 ){
     /* We are trying for an exclusive lock but another thread in this
     ** same process is still holding a shared lock. */
     rc = SQLITE_BUSY;
+    not_sqlite_cry("attempt to exclusively lock a shared lock");
   }else{
     /* The request was for a RESERVED or EXCLUSIVE lock.  It is
     ** assumed that there is a SHARED or greater lock on the file
@@ -1896,6 +1902,9 @@ static int unixLock(sqlite3_file *id, int eFileLock){
       rc = sqliteErrorFromPosixError(tErrno, SQLITE_IOERR_LOCK);
       if( rc!=SQLITE_BUSY ){
         storeLastErrno(pFile, tErrno);
+        if( eFileLock!=RESERVED_LOCK ){
+          not_sqlite_lock(pFile, SHARED_FIRST, SHARED_SIZE);
+        }
       }
     }
   }
@@ -2058,6 +2067,7 @@ static int posixUnlock(sqlite3_file *id, int eFileLock, int handleNFSUnlock){
           storeLastErrno(pFile, errno);
           goto end_unlock;
         }
+        not_sqlite_lock_shared(pFile, SHARED_FIRST, SHARED_SIZE);
       }
     }
     lock.l_type = F_UNLCK;
@@ -2084,6 +2094,7 @@ static int posixUnlock(sqlite3_file *id, int eFileLock, int handleNFSUnlock){
       lock.l_start = lock.l_len = 0L;
       if( unixFileLock(pFile, &lock)==0 ){
         pInode->eFileLock = NO_LOCK;
+        not_sqlite_unlock(pFile, SHARED_FIRST, SHARED_SIZE);
       }else{
         rc = SQLITE_IOERR_UNLOCK;
         storeLastErrno(pFile, errno);
@@ -4415,10 +4426,6 @@ static int unixFcntlExternalReader(unixFile *pFile, int *piOut){
   return rc;
 }
 
-extern void not_sqlite_lock(void*, int, int);
-extern void not_sqlite_unlock(void*, int, int);
-extern void not_sqlite_lock_shared(void*, int, int);
-
 /*
 ** Apply posix advisory locks for all bytes from ofst through ofst+n-1.
 **
@@ -5132,7 +5139,6 @@ static int unixShmLock(
         if( bUnlock ){
           rc = unixShmSystemLock(pDbFd, F_UNLCK, ofst+UNIX_SHM_BASE, n);
           if( rc==SQLITE_OK ){
-            not_sqlite_unlock(pDbFd, ofst+UNIX_SHM_BASE, n);
             memset(&aLock[ofst], 0, sizeof(int)*n);
             p->sharedMask &= ~mask;
             p->exclMask &= ~mask;
@@ -5150,7 +5156,6 @@ static int unixShmLock(
   
         /* Get the local shared locks */
         if( rc==SQLITE_OK ){
-          not_sqlite_lock_shared(pDbFd, ofst+UNIX_SHM_BASE, n);
           p->sharedMask |= mask;
           aLock[ofst]++;
         }
@@ -5176,7 +5181,6 @@ static int unixShmLock(
         if( rc==SQLITE_OK ){
           rc = unixShmSystemLock(pDbFd, F_WRLCK, ofst+UNIX_SHM_BASE, n);
           if( rc==SQLITE_OK ){
-            not_sqlite_lock(pDbFd, ofst+UNIX_SHM_BASE, n);
             p->exclMask |= mask;
             for(ii=ofst; ii<ofst+n; ii++){
               aLock[ii] = -1;
